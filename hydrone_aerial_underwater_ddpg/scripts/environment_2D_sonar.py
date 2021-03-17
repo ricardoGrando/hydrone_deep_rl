@@ -26,9 +26,9 @@ from respawnGoal_2D import Respawn
 import copy
 target_not_movable = True
 
-class Env():    
-    def __init__(self, action_dim=2):  
-        global target_not_movable      
+class Env():
+    def __init__(self, action_dim=2):
+        global target_not_movable
         self.goal_x = 0
         self.goal_y = 0
         self.heading = 0
@@ -55,10 +55,10 @@ class Env():
         else:
             target_not_movable = True
         self.stopped = 0
-        self.action_dim = action_dim        
-        self.last_time = datetime.now() 
+        self.action_dim = action_dim
+        self.last_time = datetime.now()
 
-        self.hardstep = 0        
+        self.hardstep = 0
         #Keys CTRL + c will stop script
         rospy.on_shutdown(self.shutdown)
 
@@ -100,9 +100,9 @@ class Env():
     def getState(self, scan, past_action):
         scan_range = []
         heading = self.heading
-        min_range = 1.0
+        min_range = 0.5
         done = False
-        
+
         for i in range(len(scan.data)):
             if (i%(len(scan.data)/19) == 0):
                 if scan.data[i] == float('Inf'):
@@ -113,7 +113,7 @@ class Env():
                     scan_range.append(scan.data[i])
 
         # print(len(scan_range))
-        # print(scan_range)
+        # print(min(scan_range))
 
         # if min_range > min(scan_range) > 0.0:
         #     done = True
@@ -156,7 +156,7 @@ class Env():
 
         if (reward == 100 and self.evaluating==True and self.eval_path==False):
             self.pub_reward.publish(True)
-        
+
         if (reward == 100 and self.evaluating==True and self.eval_path==True and (self.respawn_goal.counter%(len(self.respawn_goal.goal_x_list)+1))==0):
             self.pub_reward.publish(True)
             self.respawn_goal.counter = 0
@@ -210,7 +210,7 @@ class Env():
                 data = rospy.wait_for_message('/sonar_distance', Float64MultiArray, timeout=5)
             except:
                 pass
-        
+
         if self.initGoal:
             self.goal_x, self.goal_y = self.respawn_goal.getPosition()
             self.initGoal = False
@@ -227,13 +227,13 @@ class Env():
             self.pub_end.publish(False)
             rospy.signal_shutdown("end_test")
 
-        self.counter_eps += 1        
+        self.counter_eps += 1
 
         self.hardstep = 0
-        
+
         if (self.evaluating):
             rospy.loginfo("Test number: %s", str(self.counter_eps))
-        
+
         # pose_reset = Pose()
         # pose_reset.position.x = -100.0
         # self.pub_pose.publish(pose_reset)

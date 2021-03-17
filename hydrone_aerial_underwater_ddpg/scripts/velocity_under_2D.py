@@ -62,12 +62,12 @@ def position_callback(data):
     # # print(rotation)
 
     cmd_vel.linear.x = cmd_vel_x*math.cos(rotation)
-    cmd_vel.linear.y = cmd_vel_x*math.sin(rotation) 
+    cmd_vel.linear.y = cmd_vel_x*math.sin(rotation)
     # cmd_vel.linear.x = cmd_vel_x*math.cos(rotation)
 
     # cmd_vel.linear.z = -2.143
     cmd_vel.linear.z = -0.2
-    
+
     # print("X: "+str(cmd_vel.linear.x))
     # print("Y: "+str(cmd_vel.linear.y))
 
@@ -78,10 +78,10 @@ def position_callback(data):
     point.velocities.append(cmd_vel)
     velocity.points.append(point)
 
-    pub.publish(velocity)    
+    pub.publish(velocity)
 
-if __name__ == "__main__": 
-    rospy.init_node("mission_planner_node", anonymous=False)    
+if __name__ == "__main__":
+    rospy.init_node("mission_planner_node", anonymous=False)
 
     rospy.Subscriber("/hydrone_aerial_underwater/ground_truth/odometry", Odometry, position_callback)
     rospy.Subscriber("/hydrone_aerial_underwater/cmd_vel", Twist, velocity_callback)
