@@ -23,7 +23,7 @@ import math
 #---Directory Path---#
 dirPath = os.path.dirname(os.path.realpath(__file__))
 #---Functions to make network updates---#
- 
+
 def soft_update(target, source, tau):
     for target_param, param in zip(target.parameters(), source.parameters()):
         target_param.data.copy_(target_param.data*(1.0 - tau)+ param.data*tau)
@@ -44,17 +44,17 @@ class OUNoise(object):
         self.decay_period = decay_period
         self.action_dim   = action_space
         self.reset()
-        
+
     def reset(self):
         self.state = np.ones(self.action_dim) * self.mu
-        
+
     def evolve_state(self):
         x  = self.state
         dx = self.theta * (self.mu - x) + self.sigma * np.random.randn(self.action_dim)
         self.state = x + dx
         return self.state
-    
-    def get_noise(self, t=0): 
+
+    def get_noise(self, t=0):
         ou_state = self.evolve_state()
         decaying = float(float(t)/ self.decay_period)
         self.sigma = max(self.sigma - (self.max_sigma - self.min_sigma) * min(1.0, decaying), self.min_sigma)
@@ -65,26 +65,26 @@ class OUNoise(object):
 class Critic(nn.Module):
     def __init__(self, state_dim, action_dim):
         super(Critic, self).__init__()
-        
+
         self.state_dim = state_dim
         self.action_dim = action_dim
-        
+
         # self.fc1 = nn.Linear(state_dim, 256)
         # nn.init.xavier_uniform_(self.fc1.weight)
         # self.fc1.bias.data.fill_(0.01)
-        
+
         # self.fa1 = nn.Linear(action_dim, 256)
         # nn.init.xavier_uniform_(self.fa1.weight)
         # self.fa1.bias.data.fill_(0.01)
         # # self.fa1.weight.data.uniform_(-EPS, EPS)
         # # self.fa1.bias.data.uniform_(-EPS, EPS)
-        
+
         self.fca1 = nn.Linear(self.state_dim + self.action_dim, 512)
         nn.init.xavier_uniform_(self.fca1.weight)
         self.fca1.bias.data.fill_(0.01)
         # self.fca1.weight.data.uniform_(-EPS, EPS)
         # self.fca1.bias.data.uniform_(-EPS, EPS)
-        
+
         self.fca2 = nn.Linear(512, 512)
         nn.init.xavier_uniform_(self.fca2.weight)
         self.fca2.bias.data.fill_(0.01)
@@ -102,7 +102,7 @@ class Critic(nn.Module):
         # self.fca4.bias.data.fill_(0.01)
         # # self.fca2.weight.data.uniform_(-EPS, EPS)
         # # self.fca2.bias.data.uniform_(-EPS, EPS)
-        
+
     def forward(self, state, action):
         # xs = torch.relu(self.fc1(state))
         # xa = torch.relu(self.fa1(action))
@@ -123,19 +123,19 @@ class Actor(nn.Module):
         self.action_dim = action_dim
         self.action_limit_v = action_limit_v
         self.action_limit_w = action_limit_w
-        
+
         self.fa1 = nn.Linear(state_dim, 512)
         nn.init.xavier_uniform_(self.fa1.weight)
         self.fa1.bias.data.fill_(0.01)
         # self.fa1.weight.data.uniform_(-EPS, EPS)
         # self.fa1.bias.data.uniform_(-EPS, EPS)
-        
+
         self.fa2 = nn.Linear(512, 512)
         nn.init.xavier_uniform_(self.fa2.weight)
         self.fa2.bias.data.fill_(0.01)
         # self.fa2.weight.data.uniform_(-EPS, EPS)
         # self.fa2.bias.data.uniform_(-EPS, EPS)
-        
+
         self.fa3 = nn.Linear(512, action_dim)
         nn.init.xavier_uniform_(self.fa3.weight)
         self.fa3.bias.data.fill_(0.01)
@@ -153,7 +153,7 @@ class Actor(nn.Module):
         # self.fa5.bias.data.fill_(0.01)
         # # self.fa3.weight.data.uniform_(-EPS, EPS)
         # # self.fa3.bias.data.uniform_(-EPS, EPS)
-        
+
     def forward(self, state):
         x = torch.relu(self.fa1(state))
         x = torch.relu(self.fa2(x))
@@ -176,54 +176,54 @@ class ReplayBuffer:
         self.capacity = capacity
         self.buffer = []
         self.position = 0
-    
+
     def push(self, state, action, reward, next_state, done):
         if len(self.buffer) < self.capacity:
             self.buffer.append(None)
         self.buffer[self.position] = (state, action, reward, next_state, done)
         self.position = (self.position + 1) % self.capacity
-    
+
     def sample(self, batch_size):
         batch = random.sample(self.buffer, batch_size)
         state, action, reward, next_state, done = map(np.stack, zip(*batch))
         return state, action, reward, next_state, done
-    
+
     def __len__(self):
         return len(self.buffer)
 
-class Trainer:    
+class Trainer:
     def __init__(self, state_dim, action_dim, action_limit_v, action_limit_w, replay_buffer):
-        
+
         self.state_dim = state_dim
         self.action_dim = action_dim
         self.action_limit_v = action_limit_v
         self.action_limit_w = action_limit_w
-        #print('w',self.action_limit_w)       
+        #print('w',self.action_limit_w)
 
         self.replay_buffer = replay_buffer
 
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu") 
-        
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
         self.actor = Actor(self.state_dim, self.action_dim, self.action_limit_v, self.action_limit_w).to(device=self.device)
         self.target_actor = Actor(self.state_dim, self.action_dim, self.action_limit_v, self.action_limit_w).to(device=self.device)
         self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), LEARNING_RATE)
-        
+
         self.critic = Critic(self.state_dim, self.action_dim).to(device=self.device)
         self.target_critic = Critic(self.state_dim, self.action_dim).to(device=self.device)
         self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), LEARNING_RATE)
         self.pub_qvalue = rospy.Publisher('qvalue', Float32, queue_size=5)
         self.qvalue = Float32()
-        
+
         hard_update(self.target_actor, self.actor)
         hard_update(self.target_critic, self.critic)
-        
+
     def get_exploitation_action(self,state):
         state = torch.FloatTensor(state).to(self.device)
         action = self.actor.forward(state)
         #print('actionploi', action)
         # rospy.loginfo(" %s ", str(action))
         return action.detach().cpu().numpy()
-        
+
     def get_exploration_action(self, state):
         state = torch.FloatTensor(state).to(self.device)
         action = self.actor.forward(state)
@@ -236,19 +236,19 @@ class Trainer:
         new_action = action.detach().cpu().numpy() #+ noise
         #print('action_no', new_action)
         return new_action
-    
+
     def optimizer(self):
         s_sample, a_sample, r_sample, new_s_sample, done_sample = replay_buffer.sample(BATCH_SIZE)
-        
+
         s_sample = torch.FloatTensor(s_sample).to(self.device)
         a_sample = torch.FloatTensor(a_sample).to(self.device)
         r_sample = torch.FloatTensor(r_sample).to(self.device)
         new_s_sample = torch.FloatTensor(new_s_sample).to(self.device)
         done_sample = torch.FloatTensor(done_sample).to(self.device)
         # rospy.loginfo("s_sample %s , a_sample %s, r_sample %s, new_s_sample %s, done_sample %s", str(s_sample.size()), str(a_sample.size()), str(r_sample.size()), str(new_s_sample.size()), str(done_sample.size()))
-        
+
         #-------------- optimize critic
-        
+
         a_target = self.target_actor.forward(new_s_sample).detach()
         next_value = self.target_critic.forward(new_s_sample, a_target).squeeze(1).detach()
         # rospy.loginfo("next_value %s , new_s_sample %s", str(next_value.size()), str(new_s_sample.size()))
@@ -265,27 +265,27 @@ class Trainer:
         #----------------------------
         # rospy.loginfo("pred %s , exp", str(y_predicted.size()), str(y_expected.size()))
         loss_critic = F.smooth_l1_loss(y_predicted, y_expected)
-        
+
         self.critic_optimizer.zero_grad()
         loss_critic.backward()
         self.critic_optimizer.step()
-        
+
         #------------ optimize actor
         pred_a_sample = self.actor.forward(s_sample)
         loss_actor = -1*torch.sum(self.critic.forward(s_sample, pred_a_sample))
-        
+
         self.actor_optimizer.zero_grad()
         loss_actor.backward()
         self.actor_optimizer.step()
-        
+
         soft_update(self.target_actor, self.actor, TAU)
         soft_update(self.target_critic, self.critic, TAU)
-    
+
     def save_models(self, episode_count):
         torch.save(self.target_actor.state_dict(), dirPath +'/Models/' + world + '/' + str(episode_count)+ '_actor.pt')
         torch.save(self.target_critic.state_dict(), dirPath + '/Models/' + world + '/'+str(episode_count)+ '_critic.pt')
         print('****Models saved***')
-        
+
     def load_models(self, episode):
         self.actor.load_state_dict(torch.load(dirPath + '/Models/' + world + '/'+str(episode)+ '_actor.pt'))
         self.critic.load_state_dict(torch.load(dirPath + '/Models/' + world + '/'+str(episode)+ '_critic.pt'))
@@ -334,10 +334,10 @@ noise = OUNoise(ACTION_DIMENSION, max_sigma=.71, min_sigma=0.2, decay_period=800
 if __name__ == '__main__':
     global world
     rospy.init_node('ddpg')
-    pub_result = rospy.Publisher('result', String, queue_size=5)    
+    pub_result = rospy.Publisher('result', String, queue_size=5)
     ep_0 = rospy.get_param('~ep_number')
-    world = rospy.get_param('~file_path') 
-    MAX_STEPS = rospy.get_param('~max_steps') 
+    world = rospy.get_param('~file_path')
+    MAX_STEPS = rospy.get_param('~max_steps')
 
     if (ep_0 != 0):
         trainer.load_models(ep_0)
@@ -355,7 +355,7 @@ if __name__ == '__main__':
         if is_training and not ep%10 == 0 and len(replay_buffer) >= before_training*BATCH_SIZE:
             rospy.loginfo("---------------------------------")
             rospy.loginfo("Episode: %s training", str(ep))
-            rospy.loginfo("---------------------------------")            
+            rospy.loginfo("---------------------------------")
         else:
             if len(replay_buffer) >= before_training*BATCH_SIZE:
                 rospy.loginfo("---------------------------------")
@@ -373,8 +373,8 @@ if __name__ == '__main__':
 
             if is_training and not ep%10 == 0:
                 action = trainer.get_exploration_action(state)
-                
-                N = copy.deepcopy(noise.get_noise(t=step))                
+
+                N = copy.deepcopy(noise.get_noise(t=step))
                 N[0] = N[0]*ACTION_V_MAX/2
                 N[1] = N[1]*ACTION_W_MAX
                 # action[0] = action[0] + N[0]
@@ -407,13 +407,13 @@ if __name__ == '__main__':
 
             if len(replay_buffer) > before_training*BATCH_SIZE and is_training and not ep%10 == 0:
                 trainer.optimizer()
-            state = copy.deepcopy(next_state)   
+            state = copy.deepcopy(next_state)
 
             if done or step == MAX_STEPS-1:
                 rospy.loginfo("Reward per ep: %s", str(rewards_current_episode))
                 rospy.loginfo("Break step: %s", str(step))
                 rospy.loginfo("Sigma: %s", str(noise.sigma))
-                if ep%2 == 0:                   
+                if ep%2 == 0:
                     # if ram.len >= before_training*MAX_STEPS:
                     result = (str(ep)+','+str(rewards_current_episode))
                     pub_result.publish(result)

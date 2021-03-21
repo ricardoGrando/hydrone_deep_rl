@@ -70,9 +70,7 @@ class Critic(nn.Module):
         self.action_dim = action_dim
 
         self.fca1 = nn.Linear(self.state_dim + self.action_dim, 512)
-
         self.fca2 = nn.Linear(512, 512)
-
         self.fca3 = nn.Linear(512, 1)
 
     def forward(self, state, action):
@@ -97,42 +95,13 @@ class Actor(nn.Module):
         self.action_limit_w = action_limit_w
 
         self.fa1 = nn.Linear(state_dim, 512)
-        nn.init.xavier_uniform_(self.fa1.weight)
-        self.fa1.bias.data.fill_(0.01)
-        # self.fa1.weight.data.uniform_(-EPS, EPS)
-        # self.fa1.bias.data.uniform_(-EPS, EPS)
-
         self.fa2 = nn.Linear(512, 512)
-        nn.init.xavier_uniform_(self.fa2.weight)
-        self.fa2.bias.data.fill_(0.01)
-        # self.fa2.weight.data.uniform_(-EPS, EPS)
-        # self.fa2.bias.data.uniform_(-EPS, EPS)
-
         self.fa3 = nn.Linear(512, action_dim)
-        nn.init.xavier_uniform_(self.fa3.weight)
-        self.fa3.bias.data.fill_(0.01)
-        # self.fa3.weight.data.uniform_(-EPS, EPS)
-        # self.fa3.bias.data.uniform_(-EPS, EPS)
-
-        # self.fa4 = nn.Linear(512, 512)
-        # nn.init.xavier_uniform_(self.fa4.weight)
-        # self.fa4.bias.data.fill_(0.01)
-        # # self.fa3.weight.data.uniform_(-EPS, EPS)
-        # # self.fa3.bias.data.uniform_(-EPS, EPS)
-
-        # self.fa5 = nn.Linear(512, action_dim)
-        # nn.init.xavier_uniform_(self.fa5.weight)
-        # self.fa5.bias.data.fill_(0.01)
-        # # self.fa3.weight.data.uniform_(-EPS, EPS)
-        # # self.fa3.bias.data.uniform_(-EPS, EPS)
 
     def forward(self, state):
         x = torch.relu(self.fa1(state))
         x = torch.relu(self.fa2(x))
-        # x = torch.relu(self.fa3(x))
-        # x = torch.relu(self.fa4(x))
         action = self.fa3(x).squeeze(0)
-        # rospy.loginfo(" %s ", str(action))
         if state.shape <= torch.Size([self.state_dim]):
             action[0] = ((torch.tanh(action[0]) + 1.0)/2.0)*self.action_limit_v
             action[1] = torch.tanh(action[1])*self.action_limit_w
@@ -172,6 +141,8 @@ class Trainer:
         self.action_limit_w = action_limit_w
         #print('w',self.action_limit_w)
 
+        self.learn_step_cntr = 0
+
         self.replay_buffer = replay_buffer
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -180,14 +151,18 @@ class Trainer:
         self.target_actor = Actor(self.state_dim, self.action_dim, self.action_limit_v, self.action_limit_w).to(device=self.device)
         self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), LEARNING_RATE)
 
-        self.critic = Critic(self.state_dim, self.action_dim).to(device=self.device)
-        self.target_critic = Critic(self.state_dim, self.action_dim).to(device=self.device)
-        self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), LEARNING_RATE)
+        self.critic_1 = Critic(self.state_dim, self.action_dim).to(device=self.device)
+        self.target_critic_1 = Critic(self.state_dim, self.action_dim).to(device=self.device)
+        self.critic_1_optimizer = torch.optim.Adam(self.critic_1.parameters(), LEARNING_RATE)
+        self.critic_2 = Critic(self.state_dim, self.action_dim).to(device=self.device)
+        self.target_critic_2 = Critic(self.state_dim, self.action_dim).to(device=self.device)
+        self.critic_2_optimizer = torch.optim.Adam(self.critic_2.parameters(), LEARNING_RATE)
         self.pub_qvalue = rospy.Publisher('qvalue', Float32, queue_size=5)
         self.qvalue = Float32()
 
         hard_update(self.target_actor, self.actor)
-        hard_update(self.target_critic, self.critic)
+        hard_update(self.target_critic_1, self.critic_1)
+        hard_update(self.target_critic_2, self.critic_2)
 
     def get_exploitation_action(self,state):
         state = torch.FloatTensor(state).to(self.device)
@@ -209,7 +184,7 @@ class Trainer:
         #print('action_no', new_action)
         return new_action
 
-    def optimizer(self):
+    def optimizer(self, step):
         s_sample, a_sample, r_sample, new_s_sample, done_sample = replay_buffer.sample(BATCH_SIZE)
 
         s_sample = torch.FloatTensor(s_sample).to(self.device)
@@ -217,52 +192,72 @@ class Trainer:
         r_sample = torch.FloatTensor(r_sample).to(self.device)
         new_s_sample = torch.FloatTensor(new_s_sample).to(self.device)
         done_sample = torch.FloatTensor(done_sample).to(self.device)
-        # rospy.loginfo("s_sample %s , a_sample %s, r_sample %s, new_s_sample %s, done_sample %s", str(s_sample.size()), str(a_sample.size()), str(r_sample.size()), str(new_s_sample.size()), str(done_sample.size()))
-
-        #-------------- optimize critic
 
         a_target = self.target_actor.forward(new_s_sample).detach()
-        next_value = self.target_critic.forward(new_s_sample, a_target).squeeze(1).detach()
-        # rospy.loginfo("next_value %s , new_s_sample %s", str(next_value.size()), str(new_s_sample.size()))
-        # y_exp = r _ gamma*Q'(s', P'(s'))
-        y_expected = r_sample + (1 - done_sample)*GAMMA*next_value
-        # rospy.loginfo("r_sample %s , done_sample %s", str(r_sample.size()), str(done_sample.size()))
-        # y_pred = Q(s,a)
-        y_predicted = self.critic.forward(s_sample, a_sample).squeeze(1)
-        # rospy.loginfo("pred %s , exp %s", str(y_predicted.size()), str(y_expected.size()))
-        #-------Publisher of Vs------
-        self.qvalue = y_predicted.detach()
-        self.pub_qvalue.publish(torch.max(self.qvalue))
-        #print(self.qvalue, torch.max(self.qvalue))
-        #----------------------------
-        # rospy.loginfo("pred %s , exp", str(y_predicted.size()), str(y_expected.size()))
-        loss_critic = F.smooth_l1_loss(y_predicted, y_expected)
+        noisesad = copy.deepcopy(noise.get_noise(t=step))
+        N = torch.FloatTensor(noisesad).to(self.device)
+        N[0] = N[0]*ACTION_V_MAX/2
+        N[1] = N[1]*ACTION_W_MAX
+        a_t0 = (a_target[0] + N[0]).cpu()
+        a_t1 = (a_target[1] + N[1]).cpu()
+        a_target[0] = np.clip(a_t0, ACTION_V_MIN, ACTION_V_MAX)
+        a_target[1] = np.clip(a_t1, ACTION_W_MIN, ACTION_W_MAX)
+        # a_target = a_target + torch.clamp(torch.tensor(np.random.normal(scale=0.1)), -0.15, 0.15)
+        # a_target = T.clamp(a_target, -0.25, 1.0)
 
-        self.critic_optimizer.zero_grad()
+        q1_ = self.target_critic_1.forward(s_sample, a_target).squeeze(1).detach()
+        q2_ = self.target_critic_2.forward(s_sample, a_target).squeeze(1).detach()
+
+        q1 = self.critic_1.forward(s_sample, a_sample).squeeze(1)
+        q2 = self.critic_2.forward(s_sample, a_sample).squeeze(1)
+
+        critic_value_ = torch.min(q1_, q2_)
+
+        y_expected = r_sample + (1 - done_sample)*GAMMA*critic_value_
+        # y_predicted = self.critic.forward(s_sample, a_sample).squeeze(1)
+
+        # self.qvalue = y_predicted.detach()
+        # self.pub_qvalue.publish(torch.max(self.qvalue))
+        loss_critic_1 = F.smooth_l1_loss(y_expected, q1)
+        loss_critic_2 = F.smooth_l1_loss(y_expected, q2)
+
+        self.critic_1_optimizer.zero_grad()
+        self.critic_2_optimizer.zero_grad()
+        loss_critic = loss_critic_1 + loss_critic_2
         loss_critic.backward()
-        self.critic_optimizer.step()
+        self.critic_1_optimizer.step()
+        self.critic_2_optimizer.step()
 
-        #------------ optimize actor
+        self.learn_step_cntr += 1
+
+        if self.learn_step_cntr % 2 != 0:
+            return
+
         pred_a_sample = self.actor.forward(s_sample)
-        loss_actor = -1*torch.sum(self.critic.forward(s_sample, pred_a_sample))
+        loss_actor = self.critic_1.forward(s_sample, pred_a_sample)
+        loss_actor = -torch.mean(loss_actor)
 
         self.actor_optimizer.zero_grad()
         loss_actor.backward()
         self.actor_optimizer.step()
 
         soft_update(self.target_actor, self.actor, TAU)
-        soft_update(self.target_critic, self.critic, TAU)
+        soft_update(self.target_critic_1, self.critic_1, TAU)
+        soft_update(self.target_critic_2, self.critic_2, TAU)
 
     def save_models(self, episode_count):
         torch.save(self.target_actor.state_dict(), dirPath +'/Models/' + world + '/' + str(episode_count)+ '_actor.pt')
-        torch.save(self.target_critic.state_dict(), dirPath + '/Models/' + world + '/'+str(episode_count)+ '_critic.pt')
+        torch.save(self.target_critic_1.state_dict(), dirPath + '/Models/' + world + '/'+str(episode_count)+ '_critic_1.pt')
+        torch.save(self.target_critic_2.state_dict(), dirPath + '/Models/' + world + '/'+str(episode_count)+ '_critic_2.pt')
         print('****Models saved***')
 
     def load_models(self, episode):
         self.actor.load_state_dict(torch.load(dirPath + '/Models/' + world + '/'+str(episode)+ '_actor.pt'))
-        self.critic.load_state_dict(torch.load(dirPath + '/Models/' + world + '/'+str(episode)+ '_critic.pt'))
+        self.critic_1.load_state_dict(torch.load(dirPath + '/Models/' + world + '/'+str(episode)+ '_critic_1.pt'))
+        self.critic_2.load_state_dict(torch.load(dirPath + '/Models/' + world + '/'+str(episode)+ '_critic_2.pt'))
         hard_update(self.target_actor, self.actor)
-        hard_update(self.target_critic, self.critic)
+        hard_update(self.target_critic_1, self.critic_1)
+        hard_update(self.target_critic_2, self.critic_2)
         print('***Models load***')
 
 def action_unnormalized(action, high, low):
@@ -310,6 +305,7 @@ if __name__ == '__main__':
     ep_0 = rospy.get_param('~ep_number')
     world = rospy.get_param('~file_path')
     MAX_STEPS = rospy.get_param('~max_steps')
+    # MAX_STEPS = 50
 
     if (ep_0 != 0):
         trainer.load_models(ep_0)
@@ -346,6 +342,9 @@ if __name__ == '__main__':
             if is_training and not ep%10 == 0:
                 action = trainer.get_exploration_action(state)
 
+                # N = [0.0, 0.0]
+                # N[0] = np.random.normal(scale=0.1)*ACTION_V_MAX/2
+                # N[1] = np.random.normal(scale=0.1)*ACTION_W_MAX
                 N = copy.deepcopy(noise.get_noise(t=step))
                 N[0] = N[0]*ACTION_V_MAX/2
                 N[1] = N[1]*ACTION_W_MAX
@@ -377,8 +376,8 @@ if __name__ == '__main__':
                 else:
                     replay_buffer.push(state, action, reward, next_state, done)
 
-            if len(replay_buffer) > before_training*BATCH_SIZE and is_training and not ep%10 == 0:
-                trainer.optimizer()
+            if len(replay_buffer) > BATCH_SIZE and is_training and not ep%10 == 0:
+                trainer.optimizer(step)
             state = copy.deepcopy(next_state)
 
             if done or step == MAX_STEPS-1:
