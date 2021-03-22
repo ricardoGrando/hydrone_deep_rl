@@ -194,19 +194,19 @@ class Trainer:
         done_sample = torch.FloatTensor(done_sample).to(self.device)
 
         a_target = self.target_actor.forward(new_s_sample).detach()
-        noisesad = copy.deepcopy(noise.get_noise(t=step))
-        N = torch.FloatTensor(noisesad).to(self.device)
-        N[0] = N[0]*ACTION_V_MAX/2
-        N[1] = N[1]*ACTION_W_MAX
-        a_t0 = (a_target[0] + N[0]).cpu()
-        a_t1 = (a_target[1] + N[1]).cpu()
-        a_target[0] = np.clip(a_t0, ACTION_V_MIN, ACTION_V_MAX)
-        a_target[1] = np.clip(a_t1, ACTION_W_MIN, ACTION_W_MAX)
+        # noisesad = copy.deepcopy(noise.get_noise(t=step))
+        # N = torch.FloatTensor(noisesad).to(self.device)
+        # N[0] = N[0]*ACTION_V_MAX/2
+        # N[1] = N[1]*ACTION_W_MAX
+        # a_t0 = (a_target[0] + N[0]).cpu()
+        # a_t1 = (a_target[1] + N[1]).cpu()
+        # a_target[0] = np.clip(a_t0, ACTION_V_MIN, ACTION_V_MAX)
+        # a_target[1] = np.clip(a_t1, ACTION_W_MIN, ACTION_W_MAX)
         # a_target = a_target + torch.clamp(torch.tensor(np.random.normal(scale=0.1)), -0.15, 0.15)
         # a_target = T.clamp(a_target, -0.25, 1.0)
 
-        q1_ = self.target_critic_1.forward(s_sample, a_target).squeeze(1).detach()
-        q2_ = self.target_critic_2.forward(s_sample, a_target).squeeze(1).detach()
+        q1_ = self.target_critic_1.forward(new_s_sample, a_target).squeeze(1).detach()
+        q2_ = self.target_critic_2.forward(new_s_sample, a_target).squeeze(1).detach()
 
         q1 = self.critic_1.forward(s_sample, a_sample).squeeze(1)
         q2 = self.critic_2.forward(s_sample, a_sample).squeeze(1)
