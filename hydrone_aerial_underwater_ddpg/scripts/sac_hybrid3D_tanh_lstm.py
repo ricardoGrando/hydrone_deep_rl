@@ -9,7 +9,7 @@ import sys
 sys.path.append(os.path.dirname(os.path.abspath(os.path.dirname(__file__))))
 from collections import deque
 from std_msgs.msg import *
-from environment_2D import Env
+from environment_3D_sonar import Env
 import torch
 import torch.nn.functional as F
 import torch.optim as optim
@@ -23,7 +23,6 @@ from torch.optim import Adam
 
 #---Directory Path---#
 dirPath = os.path.dirname(os.path.realpath(__file__))
-
 #****************************************************
 
 class ReplayBuffer:
@@ -159,7 +158,6 @@ class PolicyNetwork(nn.Module):
         log_prob = normal.log_prob(x_t)
         log_prob -= torch.log(1 - action.pow(2) + epsilon)
         log_prob = log_prob.sum(1, keepdim=True)
-        # print(action.shape, log_prob.shape)
         return action, log_prob, mean, log_std
 
 class SAC(object):
@@ -211,7 +209,7 @@ class SAC(object):
             _, _, action, _ = self.policy.sample(state)
             action = torch.tanh(action)
         action = action.detach().cpu().numpy()
-        # print(action)
+
         return action.reshape(self.action_dim,)
 
     # def rescale_action(self, action):
@@ -235,9 +233,6 @@ class SAC(object):
             qf1_next_target, qf2_next_target = self.critic_target(next_state_batch, next_state_action)
             min_qf_next_target = torch.min(qf1_next_target, qf2_next_target) - self.alpha * next_state_log_pi
             next_q_value = reward_batch + (1 - done_batch) * self.gamma * (min_qf_next_target)
-
-        # print(next_state_action.shape, next_state_log_pi.shape, qf1_next_target.shape, qf2_next_target.shape, min_qf_next_target.shape, next_q_value.shape)
-        # print("----------------")
 
         qf1, qf2 = self.critic(state_batch, action_batch)  # Two Q-functions to mitigate positive bias in the policy improvement step
         qf1_loss = F.mse_loss(qf1, next_q_value) #
@@ -302,15 +297,15 @@ class SAC(object):
         hard_update(self.critic_target, self.critic)
         print('***Models load***')
 
-is_training = True
+is_training = False
 
 max_episodes  = 10001
 max_steps   = 500
 rewards     = []
 batch_size  = 256
 
-action_dim = 2
-state_dim  = 24
+action_dim = 3
+state_dim  = 26
 hidden_dim = 512
 ACTION_V_MIN = 0.0 # m/s
 ACTION_W_MIN = -0.25 # rad
@@ -342,7 +337,7 @@ if __name__ == '__main__':
     result = Float32()
     env = Env()
     before_training = 4
-    past_action = np.array([0.,0.])
+    past_action = np.array([0.,0.,0.0])
 
     for ep in range(ep_0, max_episodes):
         done = False
@@ -373,7 +368,7 @@ if __name__ == '__main__':
 
             if not is_training:
                 action = agent.select_action(state, eval=True)
-            unnorm_action = np.array([action_unnormalized(action[0], ACTION_V_MAX, ACTION_V_MIN), action_unnormalized(action[1], ACTION_W_MAX, ACTION_W_MIN)])
+            unnorm_action = np.array([action_unnormalized(action[0], ACTION_V_MAX, ACTION_V_MIN), action_unnormalized(action[1], ACTION_W_MAX, ACTION_W_MIN), action_unnormalized(action[2], ACTION_W_MAX, ACTION_W_MIN)])
 
             next_state, reward, done = env.step(unnorm_action, past_action)
             # print('action', unnorm_action,'r',reward)
@@ -396,6 +391,10 @@ if __name__ == '__main__':
             if done:
                 break
 
+            # if (reward == 100):
+            #     is_training = False
+            #     break
+
         rospy.loginfo("Reward per ep: %s", str(rewards_current_episode))
         rospy.loginfo("Break step: %s", str(step))
         if ep%2 == 0:
@@ -403,7 +402,7 @@ if __name__ == '__main__':
             result = (str(ep)+','+str(rewards_current_episode))
             pub_result.publish(result)
 
-        if ep%10 == 0:
+        if ep%20 == 0:
             agent.save_models(ep)
 
-# roslaunch hydrone_aerial_underwater_ddpg deep_RL_2D.launch ep:=0 file_dir:=sac_stage_1_air2D_tanh_3layers deep_rl:=sac_air2D_tanh_3layers.py world:=stage_1_aerial root_dir:=/home/ricardo/
+# roslaunch hydrone_aerial_underwater_ddpg deep_RL_2D.launch ep:=1060 file_dir:=sac_stage_1_air3D_tanh_3layers deep_rl:=sac_air3D_tanh_3layers.py world:=stage_1_aerial root_dir:=/home/ricardo/ graphic_int:=false

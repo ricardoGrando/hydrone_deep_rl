@@ -1,37 +1,41 @@
 #!/usr/bin/env python
+
 import rospy
 import numpy as np
 import math
 from math import pi
 from geometry_msgs.msg import Twist, Point, Pose
 from sensor_msgs.msg import LaserScan
+from sensor_msgs.msg import Range
+from std_msgs.msg import *
 from nav_msgs.msg import Odometry
 from std_srvs.srv import Empty
-from std_msgs.msg import Bool, Float64MultiArray
 from tf.transformations import euler_from_quaternion, quaternion_from_euler
 from datetime import datetime
 
-# # pathfollowing
+# pathfollowing
 # world = False
 # if world:
 #     from respawnGoal_custom_worlds import Respawn
 # else:
-#     from respawnGoal_2D import Respawn
+#     from respawnGoal_3D import Respawn
 # import copy
 # target_not_movable = False
 
 # Navegation
 world = True
-from respawnGoal_2D import Respawn
+from respawnGoal_3D import Respawn
 import copy
 target_not_movable = True
 
 class Env():
-    def __init__(self, action_dim=2):
+    def __init__(self, action_dim=3):
         global target_not_movable
         self.goal_x = 0
         self.goal_y = 0
+        self.goal_z = 0
         self.heading = 0
+        self.heading_z = 0
         self.initGoal = True
         self.get_goalbox = False
         self.position = Pose()
@@ -70,7 +74,7 @@ class Env():
         rospy.sleep(1)
 
     def getGoalDistace(self):
-        goal_distance = math.sqrt((self.goal_x - self.position.x)**2 + (self.goal_y - self.position.y)**2)
+        goal_distance = math.sqrt((self.goal_x - self.position.x)**2 + (self.goal_y - self.position.y)**2 + (self.goal_z - self.position.z)**2)
         self.past_distance = goal_distance
 
         return goal_distance
@@ -83,9 +87,8 @@ class Env():
         _, _, yaw = euler_from_quaternion(orientation_list)
 
         goal_angle = math.atan2(self.goal_y - self.position.y, self.goal_x - self.position.x)
-
-        #print 'yaw', yaw
-        #print 'gA', goal_angle
+        self.heading_z = math.atan2(self.goal_z - self.position.z, math.sqrt((self.goal_x - self.position.x)**2 + (self.goal_y - self.position.y)**2))
+        # rospy.loginfo("%s", goal_angle_z)
 
         heading = goal_angle - yaw
         #print 'heading', heading
@@ -100,7 +103,7 @@ class Env():
     def getState(self, scan_lidar, scan_sonar, past_action):
         scan_range = []
         heading = self.heading
-        min_range = 0.5
+        min_range = 0.55
         done = False
 
         if (self.position.z < 0.0):
@@ -121,25 +124,20 @@ class Env():
                 else:
                     scan_range.append(scan_lidar.ranges[i])
 
-        # print(len(scan_range))
-        # print(min(scan_range))
-
-        # if min_range > min(scan_range) > 0.0:
-        #     done = True
-        if min_range > min(scan_range) or self.position.z < -4.8 or self.position.z > 0.2:
+        if min_range > min(scan_range) or self.position.z < -1.1 or self.position.z > 4.8:
             # print(scan_range)
             done = True
 
         for pa in past_action:
             scan_range.append(pa)
 
-        current_distance = round(math.hypot(self.goal_x - self.position.x, self.goal_y - self.position.y),2)
+        current_distance = math.sqrt((self.goal_x - self.position.x)**2 + (self.goal_y - self.position.y)**2 + (self.goal_z - self.position.z)**2)
+        # current_distance = math.sqrt((self.goal_x - self.position.x)**2 + (self.goal_y - self.position.y)**2)
+
         if current_distance < self.arriving_distance:
             self.get_goalbox = True
 
-        # print(heading, current_distance)
-
-        return scan_range + [heading, current_distance], done
+        return scan_range + [self.heading, self.heading_z, current_distance], done
 
     def setReward(self, state, done):
         reward = 0
@@ -153,13 +151,13 @@ class Env():
             self.respawn_goal.counter = 0
 
         if self.get_goalbox:
-            rospy.loginfo("Goal!!")
+            rospy.loginfo("Goal!! "+str(abs(self.goal_z - self.position.z)))
             # reward = 500.
-            reward = 100.
+            reward = 100#/(abs(self.goal_z - self.position.z)+0.01)
             self.pub_cmd_vel.publish(Twist())
             if world and target_not_movable:
                 self.reset()
-            self.goal_x, self.goal_y = self.respawn_goal.getPosition(True, delete=True)
+            self.goal_x, self.goal_y, self.goal_z = self.respawn_goal.getPosition(True, delete=True)
             self.goal_distance = self.getGoalDistace()
             self.get_goalbox = False
 
@@ -181,17 +179,20 @@ class Env():
 
     def step(self, action, past_action):
         linear_vel_x = action[0]
-        angular_vel_z = action[1]
+        linear_vel_z = action[1]
+        angular_vel_z = action[2]
         # angular_vel_z = action[2]
 
         vel_cmd = Twist()
         vel_cmd.linear.x = linear_vel_x
-        # vel_cmd.linear.y = linear_vel_y
+        vel_cmd.linear.z = linear_vel_z
         vel_cmd.angular.z = angular_vel_z
 
         self.pub_cmd_vel.publish(vel_cmd)
 
         self.hardstep += 1
+
+        data = None
 
         data_sonar = None
         while data_sonar is None:
@@ -235,10 +236,10 @@ class Env():
                 pass
 
         if self.initGoal:
-            self.goal_x, self.goal_y = self.respawn_goal.getPosition()
+            self.goal_x, self.goal_y, self.goal_z = self.respawn_goal.getPosition()
             self.initGoal = False
         else:
-            self.goal_x, self.goal_y = self.respawn_goal.getPosition(True, delete=True)
+            self.goal_x, self.goal_y, self.goal_z = self.respawn_goal.getPosition(True, delete=True)
 
         # publish the episode time
         timer = Twist()

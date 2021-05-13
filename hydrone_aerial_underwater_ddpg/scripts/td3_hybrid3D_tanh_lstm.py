@@ -10,7 +10,7 @@ import sys
 sys.path.append(os.path.dirname(os.path.abspath(os.path.dirname(__file__))))
 from collections import deque
 from std_msgs.msg import *
-from environment_3D import Env
+from environment_3D_sonar import Env
 import torch
 import torch.nn.functional as F
 import gc

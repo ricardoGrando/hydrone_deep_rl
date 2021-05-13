@@ -10,7 +10,7 @@ import sys
 sys.path.append(os.path.dirname(os.path.abspath(os.path.dirname(__file__))))
 from collections import deque
 from std_msgs.msg import *
-from environment_3D import Env
+from environment_2D import Env
 import torch
 import torch.nn.functional as F
 import gc
@@ -99,23 +99,28 @@ class Actor(nn.Module):
         self.cell_tensor = torch.FloatTensor(1, 1, self.layer_size).to(device=self.device)
 
         self.hidden_shape = (self.hidden_tensor, self.cell_tensor)
+
         self.lstm_layer = nn.LSTM(state_dim, self.layer_size, 1, batch_first=True)
 
         self.fa1 = nn.Linear(self.layer_size, action_dim)
+        nn.init.xavier_uniform_(self.fa1.weight)
+        self.fa1.bias.data.fill_(0.01)
+        # self.fa1.weight.data.uniform_(-EPS, EPS)
+        # self.fa1.bias.data.uniform_(-EPS, EPS)
 
     def forward_sample(self, state):
+        # x, self.hidden_shape = self.lstm_layer(state.reshape((1,1,self.state_dim)), self.hidden_shape)
         x, _ = self.lstm_layer(state.reshape((1,1,self.state_dim)))
+        # print(action.is_cuda)
         action = self.fa1(x.reshape(self.layer_size)).squeeze(0)#.to(device=self.device)
+        # print(action.is_cuda)
 
         if state.shape <= torch.Size([self.state_dim]):
             action[0] = ((torch.tanh(action[0]) + 1.0)/2.0)*self.action_limit_v
             action[1] = torch.tanh(action[1])*self.action_limit_w
-            action[2] = torch.tanh(action[2])*self.action_limit_w
         else:
             action[:,0] = ((torch.tanh(action[:,0]) + 1.0)/2.0)*self.action_limit_v
             action[:,1] = torch.tanh(action[:,1])*self.action_limit_w
-            action[:,2] = torch.tanh(action[:,2])*self.action_limit_w
-
         return action
 
     def forward(self, state):
@@ -201,7 +206,7 @@ class Trainer:
         #print('action_no', new_action)
         return new_action
 
-    def optimizer(self):
+    def optimizer(self, step):
         s_sample, a_sample, r_sample, new_s_sample, done_sample = replay_buffer.sample(BATCH_SIZE)
 
         s_sample = torch.FloatTensor(s_sample).to(self.device)
@@ -300,8 +305,8 @@ MAX_STEPS = 500
 MAX_BUFFER = 50000
 rewards_all_episodes = []
 
-STATE_DIMENSION = 26
-ACTION_DIMENSION = 3
+STATE_DIMENSION = 24
+ACTION_DIMENSION = 2
 ACTION_V_MAX = 0.25 # m/s
 ACTION_V_MIN = 0.0
 ACTION_W_MAX = 0.25 # rad
@@ -313,8 +318,7 @@ print('Action Dimensions: ' + str(ACTION_DIMENSION))
 print('Action Max: ' + str(ACTION_V_MAX) + ' m/s and ' + str(ACTION_W_MAX) + ' rad')
 replay_buffer = ReplayBuffer(MAX_BUFFER)
 trainer = Trainer(STATE_DIMENSION, ACTION_DIMENSION, ACTION_V_MAX, ACTION_W_MAX, replay_buffer)
-# noise = OUNoise(ACTION_DIMENSION, max_sigma=.71, min_sigma=0.2, decay_period=8000000)
-noise = OUNoise(ACTION_DIMENSION, max_sigma=.075, min_sigma=0.03, decay_period=8000000)
+noise = OUNoise(ACTION_DIMENSION, max_sigma=.71, min_sigma=0.2, decay_period=8000000)
 
 if __name__ == '__main__':
     global world
@@ -323,6 +327,7 @@ if __name__ == '__main__':
     ep_0 = rospy.get_param('~ep_number')
     world = rospy.get_param('~file_path')
     MAX_STEPS = rospy.get_param('~max_steps')
+    # MAX_STEPS = 50
 
     if (ep_0 != 0):
         trainer.load_models(ep_0)
@@ -359,17 +364,18 @@ if __name__ == '__main__':
             if is_training and not ep%10 == 0:
                 action = trainer.get_exploration_action(state)
 
+                # N = [0.0, 0.0]
+                # N[0] = np.random.normal(scale=0.1)*ACTION_V_MAX/2
+                # N[1] = np.random.normal(scale=0.1)*ACTION_W_MAX
                 N = copy.deepcopy(noise.get_noise(t=step))
                 N[0] = N[0]*ACTION_V_MAX/2
                 N[1] = N[1]*ACTION_W_MAX
-                N[2] = N[2]*ACTION_W_MAX
                 # action[0] = action[0] + N[0]
                 # action[1] = action[1] + N[1]
                 # rospy.loginfo("Noise: %s, %s", str(N[0]), str(N[1]))
                 # rospy.loginfo("Action before: %s, %s", str(action[0]), str(action[1]))
                 action[0] = np.clip(action[0] + N[0], ACTION_V_MIN, ACTION_V_MAX)
                 action[1] = np.clip(action[1] + N[1], ACTION_W_MIN, ACTION_W_MAX)
-                action[2] = np.clip(action[2] + N[2], ACTION_W_MIN, ACTION_W_MAX)
             else:
                 action = trainer.get_exploration_action(state)
 
@@ -393,7 +399,7 @@ if __name__ == '__main__':
                     replay_buffer.push(state, action, reward, next_state, done)
 
             if len(replay_buffer) > before_training*BATCH_SIZE and is_training and not ep%10 == 0:
-                trainer.optimizer()
+                trainer.optimizer(step)
             state = copy.deepcopy(next_state)
 
             if done or step == MAX_STEPS-1:
@@ -405,11 +411,6 @@ if __name__ == '__main__':
                     result = (str(ep)+','+str(rewards_current_episode))
                     pub_result.publish(result)
                 break
-
-            # if (reward == 100):
-            #     is_training = False
-            #     break
-
         if ep%20 == 0:
             trainer.save_models(ep)
 
@@ -418,5 +419,3 @@ print('Completed Training')
 # roslaunch hydrone_aerial_underwater_ddpg deep_RL_2D.launch ep:=0 file_dir:=ddpg_stage_1_air2D_tanh_3layers deep_rl:=ddpg_air2D_tanh_3layers.py world:=stage_1_aerial root_dir:=/home/ricardo/
 
 # roslaunch hydrone_aerial_underwater_ddpg deep_RL_2D.launch ep:=380 file_dir:=ddpg_stage_1_air2D_tanh_3layers deep_rl:=ddpg_air2D_tanh_3layers.py world:=stage_1_aerial root_dir:=/home/ricardo/ graphic_int:=false
-
-# roslaunch hydrone_aerial_underwater_ddpg deep_RL_2D.launch ep:=1000 file_dir:=ddpg_stage_1_air3D_tanh_3layers deep_rl:=ddpg_air3D_tanh_3layers.py world:=stage_1 root_dir:=/home/ricardo/ graphic_int:=true testing:=true x:=2.0 y:=3.0 z:=-1.0 arr_distance:=0.25 testing_eps:=200

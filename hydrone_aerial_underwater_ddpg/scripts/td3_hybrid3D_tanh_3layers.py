@@ -10,7 +10,7 @@ import sys
 sys.path.append(os.path.dirname(os.path.abspath(os.path.dirname(__file__))))
 from collections import deque
 from std_msgs.msg import *
-from environment_3D import Env
+from environment_3D_sonar import Env
 import torch
 import torch.nn.functional as F
 import gc
@@ -93,20 +93,15 @@ class Actor(nn.Module):
         self.action_dim = action_dim
         self.action_limit_v = action_limit_v
         self.action_limit_w = action_limit_w
-        self.layer_size = 32
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.hidden_tensor = torch.FloatTensor(1, 1, self.layer_size).to(device=self.device)
-        self.cell_tensor = torch.FloatTensor(1, 1, self.layer_size).to(device=self.device)
 
-        self.hidden_shape = (self.hidden_tensor, self.cell_tensor)
-        self.lstm_layer = nn.LSTM(state_dim, self.layer_size, 1, batch_first=True)
+        self.fa1 = nn.Linear(state_dim, 512)
+        self.fa2 = nn.Linear(512, 512)
+        self.fa3 = nn.Linear(512, action_dim)
 
-        self.fa1 = nn.Linear(self.layer_size, action_dim)
-
-    def forward_sample(self, state):
-        x, _ = self.lstm_layer(state.reshape((1,1,self.state_dim)))
-        action = self.fa1(x.reshape(self.layer_size)).squeeze(0)#.to(device=self.device)
-
+    def forward(self, state):
+        x = torch.relu(self.fa1(state))
+        x = torch.relu(self.fa2(x))
+        action = self.fa3(x).squeeze(0)
         if state.shape <= torch.Size([self.state_dim]):
             action[0] = ((torch.tanh(action[0]) + 1.0)/2.0)*self.action_limit_v
             action[1] = torch.tanh(action[1])*self.action_limit_w
@@ -115,17 +110,7 @@ class Actor(nn.Module):
             action[:,0] = ((torch.tanh(action[:,0]) + 1.0)/2.0)*self.action_limit_v
             action[:,1] = torch.tanh(action[:,1])*self.action_limit_w
             action[:,2] = torch.tanh(action[:,2])*self.action_limit_w
-
         return action
-
-    def forward(self, state):
-        if (state.shape[0] == 256):
-            action = torch.FloatTensor(np.random.rand(256,ACTION_DIMENSION)).to(device=self.device)
-            for i in range(0, 256):
-                action[i] = self.forward_sample(state[i])
-            return action
-        else:
-            return self.forward_sample(state)
 
 #---Memory Buffer---#
 
@@ -284,7 +269,7 @@ def action_unnormalized(action, high, low):
 
 #---Run agent---#
 
-is_training = False
+is_training = True
 
 #---Where the train is made---#
 
@@ -313,8 +298,8 @@ print('Action Dimensions: ' + str(ACTION_DIMENSION))
 print('Action Max: ' + str(ACTION_V_MAX) + ' m/s and ' + str(ACTION_W_MAX) + ' rad')
 replay_buffer = ReplayBuffer(MAX_BUFFER)
 trainer = Trainer(STATE_DIMENSION, ACTION_DIMENSION, ACTION_V_MAX, ACTION_W_MAX, replay_buffer)
-# noise = OUNoise(ACTION_DIMENSION, max_sigma=.71, min_sigma=0.2, decay_period=8000000)
-noise = OUNoise(ACTION_DIMENSION, max_sigma=.075, min_sigma=0.03, decay_period=8000000)
+noise = OUNoise(ACTION_DIMENSION, max_sigma=.71, min_sigma=0.2, decay_period=8000000)
+# noise = OUNoise(ACTION_DIMENSION, max_sigma=.075, min_sigma=0.03, decay_period=8000000)
 
 if __name__ == '__main__':
     global world
@@ -418,5 +403,3 @@ print('Completed Training')
 # roslaunch hydrone_aerial_underwater_ddpg deep_RL_2D.launch ep:=0 file_dir:=ddpg_stage_1_air2D_tanh_3layers deep_rl:=ddpg_air2D_tanh_3layers.py world:=stage_1_aerial root_dir:=/home/ricardo/
 
 # roslaunch hydrone_aerial_underwater_ddpg deep_RL_2D.launch ep:=380 file_dir:=ddpg_stage_1_air2D_tanh_3layers deep_rl:=ddpg_air2D_tanh_3layers.py world:=stage_1_aerial root_dir:=/home/ricardo/ graphic_int:=false
-
-# roslaunch hydrone_aerial_underwater_ddpg deep_RL_2D.launch ep:=1000 file_dir:=ddpg_stage_1_air3D_tanh_3layers deep_rl:=ddpg_air3D_tanh_3layers.py world:=stage_1 root_dir:=/home/ricardo/ graphic_int:=true testing:=true x:=2.0 y:=3.0 z:=-1.0 arr_distance:=0.25 testing_eps:=200

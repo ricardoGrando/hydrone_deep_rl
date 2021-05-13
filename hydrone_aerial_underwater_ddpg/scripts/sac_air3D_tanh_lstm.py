@@ -30,18 +30,18 @@ class ReplayBuffer:
         self.capacity = capacity
         self.buffer = []
         self.position = 0
-    
+
     def push(self, state, action, reward, next_state, done):
         if len(self.buffer) < self.capacity:
             self.buffer.append(None)
         self.buffer[self.position] = (state, action, reward, next_state, done)
         self.position = (self.position + 1) % self.capacity
-    
+
     def sample(self, batch_size):
         batch = random.sample(self.buffer, batch_size)
         state, action, reward, next_state, done = map(np.stack, zip(*batch))
         return state, action, reward, next_state, done
-    
+
     def __len__(self):
         return len(self.buffer)
 
@@ -66,55 +66,55 @@ def action_unnormalized(action, high, low):
 class QNetwork(nn.Module):
     def __init__(self, state_dim, action_dim, hidden_dim):
         super(QNetwork, self).__init__()
-        
+
         # Q1
         self.linear1_q1 = nn.Linear(state_dim + action_dim, hidden_dim)
         self.linear2_q1 = nn.Linear(hidden_dim, hidden_dim)
         # self.linear3_q1 = nn.Linear(hidden_dim, hidden_dim)
         self.linear3_q1 = nn.Linear(hidden_dim, 1)
-        
+
         # Q2
         self.linear1_q2 = nn.Linear(state_dim + action_dim, hidden_dim)
         self.linear2_q2 = nn.Linear(hidden_dim, hidden_dim)
         # self.linear3_q2 = nn.Linear(hidden_dim, hidden_dim)
         self.linear3_q2 = nn.Linear(hidden_dim, 1)
-        
+
         self.apply(weights_init_)
-        
+
     def forward(self, state, action):
         x_state_action = torch.cat([state, action], 1)
-        
+
         x1 = F.relu(self.linear1_q1(x_state_action))
         x1 = F.relu(self.linear2_q1(x1))
         # x1 = F.relu(self.linear3_q1(x1))
         x1 = self.linear3_q1(x1)
-        
+
         x2 = F.relu(self.linear1_q2(x_state_action))
         x2 = F.relu(self.linear2_q2(x2))
         # x2 = F.relu(self.linear3_q2(x2))
         x2 = self.linear3_q2(x2)
-        
+
         return x1, x2
 
 class PolicyNetwork(nn.Module):
     def __init__(self, state_dim, action_dim, hidden_dim, log_std_min=-20, log_std_max=2):
         super(PolicyNetwork, self).__init__()
-        
+
         self.log_std_min = log_std_min
         self.log_std_max = log_std_max
         self.state_dim = state_dim
         self.action_dim = action_dim
-        
+
         # self.linear1 = nn.Linear(state_dim, hidden_dim)
         # self.linear2 = nn.Linear(hidden_dim, hidden_dim)
         self.layer_size = 32
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu") 
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         self.hidden_tensor = torch.FloatTensor(1, 1, self.layer_size).to(device=self.device)
         self.cell_tensor = torch.FloatTensor(1, 1, self.layer_size).to(device=self.device)
 
         self.hidden_shape = (self.hidden_tensor, self.cell_tensor)
-        
+
         self.lstm_layer = nn.LSTM(state_dim, self.layer_size, 1, batch_first=True)
 
         self.mean_linear = nn.Linear(self.layer_size, action_dim)
@@ -134,13 +134,13 @@ class PolicyNetwork(nn.Module):
                 mean[k] = self.mean_linear(x)
                 log_std[k] = self.log_std_linear(x)
 
-            log_std = torch.clamp(log_std, min=self.log_std_min, max=self.log_std_max)            
+            log_std = torch.clamp(log_std, min=self.log_std_min, max=self.log_std_max)
         else:
             x, _ = self.lstm_layer(state.reshape((1,1,self.state_dim)))
             mean = self.mean_linear(x)
             log_std = self.log_std_linear(x)
             log_std = torch.clamp(log_std, min=self.log_std_min, max=self.log_std_max)
-        return mean, log_std    
+        return mean, log_std
 
     def sample(self, state, epsilon=1e-6):
         mean, log_std = self.forward(state)
@@ -149,11 +149,11 @@ class PolicyNetwork(nn.Module):
         x_t = normal.rsample()
         action = torch.tanh(x_t)
         # print(action.shape)
-        if (action.shape[0] == batch_size): 
+        if (action.shape[0] == batch_size):
             action = action.reshape(batch_size, self.action_dim)
         else:
             action = action.reshape(self.action_dim,)
-            
+
         # print(action[1])
         log_prob = normal.log_prob(x_t)
         log_prob -= torch.log(1 - action.pow(2) + epsilon)
@@ -162,9 +162,9 @@ class PolicyNetwork(nn.Module):
 
 class SAC(object):
     def __init__(self, state_dim,
-                 action_dim, gamma=0.99, 
-                 tau=1e-2, 
-                 alpha=0.2, 
+                 action_dim, gamma=0.99,
+                 tau=1e-2,
+                 alpha=0.2,
                  hidden_dim=256,
                  lr=0.0003):
 
@@ -180,11 +180,11 @@ class SAC(object):
         self.target_update_interval = 1
         #self.automatic_entropy_tuning = False
 
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu") 
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         self.critic = QNetwork(state_dim, action_dim, hidden_dim).to(device=self.device)
         self.critic_optim = Adam(self.critic.parameters(), lr=self.lr)
-        
+
         self.critic_target = QNetwork(state_dim, action_dim, hidden_dim).to(self.device)
         hard_update(self.critic_target, self.critic)
 
@@ -192,15 +192,15 @@ class SAC(object):
         #self.value_target = ValueNetwork(state_dim, hidden_dim).to(self.device)
         #self.value_optim = Adam(self.value.parameters(), lr=self.lr)
         #hard_update(self.value_target, self.value)
-        
+
         self.target_entropy = -torch.prod(torch.Tensor([action_dim]).to(self.device)).item()
         print('entropy', self.target_entropy)
         self.log_alpha = torch.zeros(1, requires_grad=True, device=self.device)
-        self.alpha_optim = Adam([self.log_alpha], lr=self.lr)        
+        self.alpha_optim = Adam([self.log_alpha], lr=self.lr)
 
         self.policy = PolicyNetwork(state_dim, action_dim, hidden_dim).to(self.device)
-        self.policy_optim = Adam(self.policy.parameters(), lr=self.lr)        
-        
+        self.policy_optim = Adam(self.policy.parameters(), lr=self.lr)
+
     def select_action(self, state, eval=False):
         state = torch.FloatTensor(state).to(self.device).unsqueeze(0)
         if eval == False:
@@ -211,11 +211,11 @@ class SAC(object):
         action = action.detach().cpu().numpy()
 
         return action.reshape(self.action_dim,)
-    
+
     # def rescale_action(self, action):
     #     return action * (self.action_range[1] - self.action_range[0]) / 2.0 +\
     #             (self.action_range[1] + self.action_range[0]) / 2.0
-    
+
     def update_parameters(self, memory, batch_size):
         # Sample a batch from memory
         state_batch, action_batch, reward_batch, next_state_batch, done_batch = memory.sample(batch_size=batch_size)
@@ -233,10 +233,10 @@ class SAC(object):
             qf1_next_target, qf2_next_target = self.critic_target(next_state_batch, next_state_action)
             min_qf_next_target = torch.min(qf1_next_target, qf2_next_target) - self.alpha * next_state_log_pi
             next_q_value = reward_batch + (1 - done_batch) * self.gamma * (min_qf_next_target)
-            
+
         qf1, qf2 = self.critic(state_batch, action_batch)  # Two Q-functions to mitigate positive bias in the policy improvement step
-        qf1_loss = F.mse_loss(qf1, next_q_value) # 
-        qf2_loss = F.mse_loss(qf2, next_q_value) # 
+        qf1_loss = F.mse_loss(qf1, next_q_value) #
+        qf2_loss = F.mse_loss(qf2, next_q_value) #
         qf_loss = qf1_loss + qf2_loss
 
         self.critic_optim.zero_grad()
@@ -248,7 +248,7 @@ class SAC(object):
         qf1_pi, qf2_pi = self.critic(state_batch, pi)
         min_qf_pi = torch.min(qf1_pi, qf2_pi)
 
-        policy_loss = ((self.alpha * log_pi) - min_qf_pi).mean() 
+        policy_loss = ((self.alpha * log_pi) - min_qf_pi).mean()
         # Regularization Loss
         #reg_loss = 0.001 * (mean.pow(2).mean() + log_std.pow(2).mean())
         #policy_loss += reg_loss
@@ -258,16 +258,16 @@ class SAC(object):
         self.policy_optim.step()
 
         #vf = self.value(state_batch)
-        
+
         #with torch.no_grad():
         #    vf_target = min_qf_pi - (self.alpha * log_pi)
 
-        #vf_loss = F.mse_loss(vf, vf_target) # 
+        #vf_loss = F.mse_loss(vf, vf_target) #
 
         #self.value_optim.zero_grad()
         #vf_loss.backward()
         #self.value_optim.step()
-        
+
         alpha_loss = -(self.log_alpha * (log_pi + self.target_entropy).detach()).mean()
 
         self.alpha_optim.zero_grad()
@@ -281,7 +281,7 @@ class SAC(object):
         soft_update(self.critic_target, self.critic, self.tau)
 
         #return vf_loss.item(), qf1_loss.item(), qf2_loss.item(), policy_loss.item()
-    
+
     # Save model parameters
     def save_models(self, episode_count):
         torch.save(self.policy.state_dict(), dirPath + '/Models/' + world + '/'+str(episode_count)+ '_policy_net.pth')
@@ -289,7 +289,7 @@ class SAC(object):
         print("====================================")
         print("Model has been saved...")
         print("====================================")
-    
+
     # Load model parameters
     def load_models(self, episode):
         self.policy.load_state_dict(torch.load(dirPath + '/Models/' + world + '/'+str(episode)+ '_policy_net.pth'))
@@ -297,7 +297,7 @@ class SAC(object):
         hard_update(self.critic_target, self.critic)
         print('***Models load***')
 
-is_training = True
+is_training = False
 
 max_episodes  = 10001
 max_steps   = 500
@@ -319,21 +319,21 @@ print('Action Dimensions: ' + str(action_dim))
 print('Action Max: ' + str(ACTION_V_MAX) + ' m/s and ' + str(ACTION_W_MAX) + ' rad')
 
 agent = SAC(state_dim, action_dim)
-replay_buffer = ReplayBuffer(replay_buffer_size)    
+replay_buffer = ReplayBuffer(replay_buffer_size)
 
 if __name__ == '__main__':
     global world
     rospy.init_node('sac')
     pub_result = rospy.Publisher('result', String, queue_size=5)
     ep_0 = rospy.get_param('~ep_number')
-    world = rospy.get_param('~file_path') 
-    max_steps = rospy.get_param('~max_steps') 
+    world = rospy.get_param('~file_path')
+    max_steps = rospy.get_param('~max_steps')
 
     if (ep_0 != 0):
         agent.load_models(ep_0)
 
     rospy.loginfo("Starting at episode: %s ", str(ep_0))
- 
+
     result = Float32()
     env = Env()
     before_training = 4
@@ -341,7 +341,7 @@ if __name__ == '__main__':
 
     for ep in range(ep_0, max_episodes):
         done = False
-        state = env.reset()        
+        state = env.reset()
         if is_training and not ep%10 == 0 and len(replay_buffer) > before_training*batch_size:
             rospy.loginfo("---------------------------------")
             rospy.loginfo("Episode: %s training", str(ep))
@@ -383,7 +383,7 @@ if __name__ == '__main__':
                         replay_buffer.push(state, action, reward, next_state, done)
                 else:
                     replay_buffer.push(state, action, reward, next_state, done)
-            
+
             if len(replay_buffer) > before_training*batch_size and is_training and not ep% 10 == 0:
                 agent.update_parameters(replay_buffer, batch_size)
             state = copy.deepcopy(next_state)
@@ -394,14 +394,14 @@ if __name__ == '__main__':
             # if (reward == 100):
             #     is_training = False
             #     break
-        
+
         rospy.loginfo("Reward per ep: %s", str(rewards_current_episode))
         rospy.loginfo("Break step: %s", str(step))
         if ep%2 == 0:
             # if len(replay_buffer) > before_training*batch_size:
             result = (str(ep)+','+str(rewards_current_episode))
             pub_result.publish(result)
-        
+
         if ep%20 == 0:
             agent.save_models(ep)
 

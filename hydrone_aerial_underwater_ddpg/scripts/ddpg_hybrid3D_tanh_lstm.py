@@ -10,7 +10,7 @@ import sys
 sys.path.append(os.path.dirname(os.path.abspath(os.path.dirname(__file__))))
 from collections import deque
 from std_msgs.msg import *
-from environment_3D import Env
+from environment_3D_sonar import Env
 import torch
 import torch.nn.functional as F
 import gc
@@ -69,9 +69,39 @@ class Critic(nn.Module):
         self.state_dim = state_dim
         self.action_dim = action_dim
 
+        # self.fc1 = nn.Linear(state_dim, 256)
+        # nn.init.xavier_uniform_(self.fc1.weight)
+        # self.fc1.bias.data.fill_(0.01)
+
+        # self.fa1 = nn.Linear(action_dim, 256)
+        # nn.init.xavier_uniform_(self.fa1.weight)
+        # self.fa1.bias.data.fill_(0.01)
+        # # self.fa1.weight.data.uniform_(-EPS, EPS)
+        # # self.fa1.bias.data.uniform_(-EPS, EPS)
+
         self.fca1 = nn.Linear(self.state_dim + self.action_dim, 512)
+        nn.init.xavier_uniform_(self.fca1.weight)
+        self.fca1.bias.data.fill_(0.01)
+        # self.fca1.weight.data.uniform_(-EPS, EPS)
+        # self.fca1.bias.data.uniform_(-EPS, EPS)
+
         self.fca2 = nn.Linear(512, 512)
+        nn.init.xavier_uniform_(self.fca2.weight)
+        self.fca2.bias.data.fill_(0.01)
+        # self.fca2.weight.data.uniform_(-EPS, EPS)
+        # self.fca2.bias.data.uniform_(-EPS, EPS)
+
         self.fca3 = nn.Linear(512, 1)
+        nn.init.xavier_uniform_(self.fca3.weight)
+        self.fca3.bias.data.fill_(0.01)
+        # self.fca2.weight.data.uniform_(-EPS, EPS)
+        # self.fca2.bias.data.uniform_(-EPS, EPS)
+
+        # self.fca4 = nn.Linear(512, 1)
+        # nn.init.xavier_uniform_(self.fca4.weight)
+        # self.fca4.bias.data.fill_(0.01)
+        # # self.fca2.weight.data.uniform_(-EPS, EPS)
+        # # self.fca2.bias.data.uniform_(-EPS, EPS)
 
     def forward(self, state, action):
         # xs = torch.relu(self.fc1(state))
@@ -99,13 +129,21 @@ class Actor(nn.Module):
         self.cell_tensor = torch.FloatTensor(1, 1, self.layer_size).to(device=self.device)
 
         self.hidden_shape = (self.hidden_tensor, self.cell_tensor)
+
         self.lstm_layer = nn.LSTM(state_dim, self.layer_size, 1, batch_first=True)
 
         self.fa1 = nn.Linear(self.layer_size, action_dim)
+        nn.init.xavier_uniform_(self.fa1.weight)
+        self.fa1.bias.data.fill_(0.01)
+        # self.fa1.weight.data.uniform_(-EPS, EPS)
+        # self.fa1.bias.data.uniform_(-EPS, EPS)
 
     def forward_sample(self, state):
+        # x, self.hidden_shape = self.lstm_layer(state.reshape((1,1,self.state_dim)), self.hidden_shape)
         x, _ = self.lstm_layer(state.reshape((1,1,self.state_dim)))
+        # print(action.is_cuda)
         action = self.fa1(x.reshape(self.layer_size)).squeeze(0)#.to(device=self.device)
+        # print(action.is_cuda)
 
         if state.shape <= torch.Size([self.state_dim]):
             action[0] = ((torch.tanh(action[0]) + 1.0)/2.0)*self.action_limit_v
@@ -158,8 +196,6 @@ class Trainer:
         self.action_limit_w = action_limit_w
         #print('w',self.action_limit_w)
 
-        self.learn_step_cntr = 0
-
         self.replay_buffer = replay_buffer
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -168,18 +204,14 @@ class Trainer:
         self.target_actor = Actor(self.state_dim, self.action_dim, self.action_limit_v, self.action_limit_w).to(device=self.device)
         self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), LEARNING_RATE)
 
-        self.critic_1 = Critic(self.state_dim, self.action_dim).to(device=self.device)
-        self.target_critic_1 = Critic(self.state_dim, self.action_dim).to(device=self.device)
-        self.critic_1_optimizer = torch.optim.Adam(self.critic_1.parameters(), LEARNING_RATE)
-        self.critic_2 = Critic(self.state_dim, self.action_dim).to(device=self.device)
-        self.target_critic_2 = Critic(self.state_dim, self.action_dim).to(device=self.device)
-        self.critic_2_optimizer = torch.optim.Adam(self.critic_2.parameters(), LEARNING_RATE)
+        self.critic = Critic(self.state_dim, self.action_dim).to(device=self.device)
+        self.target_critic = Critic(self.state_dim, self.action_dim).to(device=self.device)
+        self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), LEARNING_RATE)
         self.pub_qvalue = rospy.Publisher('qvalue', Float32, queue_size=5)
         self.qvalue = Float32()
 
         hard_update(self.target_actor, self.actor)
-        hard_update(self.target_critic_1, self.critic_1)
-        hard_update(self.target_critic_2, self.critic_2)
+        hard_update(self.target_critic, self.critic)
 
     def get_exploitation_action(self,state):
         state = torch.FloatTensor(state).to(self.device)
@@ -209,72 +241,52 @@ class Trainer:
         r_sample = torch.FloatTensor(r_sample).to(self.device)
         new_s_sample = torch.FloatTensor(new_s_sample).to(self.device)
         done_sample = torch.FloatTensor(done_sample).to(self.device)
+        # rospy.loginfo("s_sample %s , a_sample %s, r_sample %s, new_s_sample %s, done_sample %s", str(s_sample.size()), str(a_sample.size()), str(r_sample.size()), str(new_s_sample.size()), str(done_sample.size()))
+
+        #-------------- optimize critic
 
         a_target = self.target_actor.forward(new_s_sample).detach()
-        # noisesad = copy.deepcopy(noise.get_noise(t=step))
-        # N = torch.FloatTensor(noisesad).to(self.device)
-        # N[0] = N[0]*ACTION_V_MAX/2
-        # N[1] = N[1]*ACTION_W_MAX
-        # a_t0 = (a_target[0] + N[0]).cpu()
-        # a_t1 = (a_target[1] + N[1]).cpu()
-        # a_target[0] = np.clip(a_t0, ACTION_V_MIN, ACTION_V_MAX)
-        # a_target[1] = np.clip(a_t1, ACTION_W_MIN, ACTION_W_MAX)
-        # a_target = a_target + torch.clamp(torch.tensor(np.random.normal(scale=0.1)), -0.15, 0.15)
-        # a_target = T.clamp(a_target, -0.25, 1.0)
+        next_value = self.target_critic.forward(new_s_sample, a_target).squeeze(1).detach()
+        # rospy.loginfo("next_value %s , new_s_sample %s", str(next_value.size()), str(new_s_sample.size()))
+        # y_exp = r _ gamma*Q'(s', P'(s'))
+        y_expected = r_sample + (1 - done_sample)*GAMMA*next_value
+        # rospy.loginfo("r_sample %s , done_sample %s", str(r_sample.size()), str(done_sample.size()))
+        # y_pred = Q(s,a)
+        y_predicted = self.critic.forward(s_sample, a_sample).squeeze(1)
+        # rospy.loginfo("pred %s , exp %s", str(y_predicted.size()), str(y_expected.size()))
+        #-------Publisher of Vs------
+        self.qvalue = y_predicted.detach()
+        self.pub_qvalue.publish(torch.max(self.qvalue))
+        #print(self.qvalue, torch.max(self.qvalue))
+        #----------------------------
+        # rospy.loginfo("pred %s , exp", str(y_predicted.size()), str(y_expected.size()))
+        loss_critic = F.smooth_l1_loss(y_predicted, y_expected)
 
-        q1_ = self.target_critic_1.forward(new_s_sample, a_target).squeeze(1).detach()
-        q2_ = self.target_critic_2.forward(new_s_sample, a_target).squeeze(1).detach()
-
-        q1 = self.critic_1.forward(s_sample, a_sample).squeeze(1)
-        q2 = self.critic_2.forward(s_sample, a_sample).squeeze(1)
-
-        critic_value_ = torch.min(q1_, q2_)
-
-        y_expected = r_sample + (1 - done_sample)*GAMMA*critic_value_
-        # y_predicted = self.critic.forward(s_sample, a_sample).squeeze(1)
-
-        # self.qvalue = y_predicted.detach()
-        # self.pub_qvalue.publish(torch.max(self.qvalue))
-        loss_critic_1 = F.smooth_l1_loss(y_expected, q1)
-        loss_critic_2 = F.smooth_l1_loss(y_expected, q2)
-
-        self.critic_1_optimizer.zero_grad()
-        self.critic_2_optimizer.zero_grad()
-        loss_critic = loss_critic_1 + loss_critic_2
+        self.critic_optimizer.zero_grad()
         loss_critic.backward()
-        self.critic_1_optimizer.step()
-        self.critic_2_optimizer.step()
+        self.critic_optimizer.step()
 
-        self.learn_step_cntr += 1
-
-        if self.learn_step_cntr % 2 != 0:
-            return
-
+        #------------ optimize actor
         pred_a_sample = self.actor.forward(s_sample)
-        loss_actor = self.critic_1.forward(s_sample, pred_a_sample)
-        loss_actor = -torch.mean(loss_actor)
+        loss_actor = -1*torch.sum(self.critic.forward(s_sample, pred_a_sample))
 
         self.actor_optimizer.zero_grad()
         loss_actor.backward()
         self.actor_optimizer.step()
 
         soft_update(self.target_actor, self.actor, TAU)
-        soft_update(self.target_critic_1, self.critic_1, TAU)
-        soft_update(self.target_critic_2, self.critic_2, TAU)
+        soft_update(self.target_critic, self.critic, TAU)
 
     def save_models(self, episode_count):
         torch.save(self.target_actor.state_dict(), dirPath +'/Models/' + world + '/' + str(episode_count)+ '_actor.pt')
-        torch.save(self.target_critic_1.state_dict(), dirPath + '/Models/' + world + '/'+str(episode_count)+ '_critic_1.pt')
-        torch.save(self.target_critic_2.state_dict(), dirPath + '/Models/' + world + '/'+str(episode_count)+ '_critic_2.pt')
+        torch.save(self.target_critic.state_dict(), dirPath + '/Models/' + world + '/'+str(episode_count)+ '_critic.pt')
         print('****Models saved***')
 
     def load_models(self, episode):
         self.actor.load_state_dict(torch.load(dirPath + '/Models/' + world + '/'+str(episode)+ '_actor.pt'))
-        self.critic_1.load_state_dict(torch.load(dirPath + '/Models/' + world + '/'+str(episode)+ '_critic_1.pt'))
-        self.critic_2.load_state_dict(torch.load(dirPath + '/Models/' + world + '/'+str(episode)+ '_critic_2.pt'))
+        self.critic.load_state_dict(torch.load(dirPath + '/Models/' + world + '/'+str(episode)+ '_critic.pt'))
         hard_update(self.target_actor, self.actor)
-        hard_update(self.target_critic_1, self.critic_1)
-        hard_update(self.target_critic_2, self.critic_2)
+        hard_update(self.target_critic, self.critic)
         print('***Models load***')
 
 def action_unnormalized(action, high, low):
@@ -284,7 +296,7 @@ def action_unnormalized(action, high, low):
 
 #---Run agent---#
 
-is_training = False
+is_training = True
 
 #---Where the train is made---#
 
@@ -301,6 +313,7 @@ MAX_BUFFER = 50000
 rewards_all_episodes = []
 
 STATE_DIMENSION = 26
+LASER_SAMPLES = 20
 ACTION_DIMENSION = 3
 ACTION_V_MAX = 0.25 # m/s
 ACTION_V_MIN = 0.0
@@ -313,8 +326,8 @@ print('Action Dimensions: ' + str(ACTION_DIMENSION))
 print('Action Max: ' + str(ACTION_V_MAX) + ' m/s and ' + str(ACTION_W_MAX) + ' rad')
 replay_buffer = ReplayBuffer(MAX_BUFFER)
 trainer = Trainer(STATE_DIMENSION, ACTION_DIMENSION, ACTION_V_MAX, ACTION_W_MAX, replay_buffer)
-# noise = OUNoise(ACTION_DIMENSION, max_sigma=.71, min_sigma=0.2, decay_period=8000000)
-noise = OUNoise(ACTION_DIMENSION, max_sigma=.075, min_sigma=0.03, decay_period=8000000)
+noise = OUNoise(ACTION_DIMENSION, max_sigma=.71, min_sigma=0.2, decay_period=8000000)
+# noise = OUNoise(ACTION_DIMENSION, max_sigma=.075, min_sigma=0.03, decay_period=8000000)
 
 if __name__ == '__main__':
     global world

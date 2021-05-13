@@ -9,7 +9,7 @@ import sys
 sys.path.append(os.path.dirname(os.path.abspath(os.path.dirname(__file__))))
 from collections import deque
 from std_msgs.msg import *
-from environment_2D import Env
+from environment_3D_sonar import Env
 import torch
 import torch.nn.functional as F
 import torch.optim as optim
@@ -23,7 +23,6 @@ from torch.optim import Adam
 
 #---Directory Path---#
 dirPath = os.path.dirname(os.path.realpath(__file__))
-
 #****************************************************
 
 class ReplayBuffer:
@@ -103,44 +102,21 @@ class PolicyNetwork(nn.Module):
 
         self.log_std_min = log_std_min
         self.log_std_max = log_std_max
-        self.state_dim = state_dim
-        self.action_dim = action_dim
 
-        # self.linear1 = nn.Linear(state_dim, hidden_dim)
-        # self.linear2 = nn.Linear(hidden_dim, hidden_dim)
-        self.layer_size = 32
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.linear1 = nn.Linear(state_dim, hidden_dim)
+        self.linear2 = nn.Linear(hidden_dim, hidden_dim)
 
-        self.hidden_tensor = torch.FloatTensor(1, 1, self.layer_size).to(device=self.device)
-        self.cell_tensor = torch.FloatTensor(1, 1, self.layer_size).to(device=self.device)
-
-        self.hidden_shape = (self.hidden_tensor, self.cell_tensor)
-
-        self.lstm_layer = nn.LSTM(state_dim, self.layer_size, 1, batch_first=True)
-
-        self.mean_linear = nn.Linear(self.layer_size, action_dim)
-        self.log_std_linear = nn.Linear(self.layer_size, action_dim)
+        self.mean_linear = nn.Linear(hidden_dim, action_dim)
+        self.log_std_linear = nn.Linear(hidden_dim, action_dim)
 
         self.apply(weights_init_)
 
     def forward(self, state):
-        # x = F.relu(self.linear1(state))
-        # x = F.relu(self.linear2(x))
-        # print(state.shape)
-        if (state.shape[0] == batch_size):
-            mean = torch.FloatTensor(np.random.rand(batch_size,self.action_dim)).to(device=self.device)
-            log_std = torch.FloatTensor(np.random.rand(batch_size,self.action_dim)).to(device=self.device)
-            for k in range(0, batch_size):
-                x, _ = self.lstm_layer(state[k].reshape((1,1,self.state_dim)))
-                mean[k] = self.mean_linear(x)
-                log_std[k] = self.log_std_linear(x)
-
-            log_std = torch.clamp(log_std, min=self.log_std_min, max=self.log_std_max)
-        else:
-            x, _ = self.lstm_layer(state.reshape((1,1,self.state_dim)))
-            mean = self.mean_linear(x)
-            log_std = self.log_std_linear(x)
-            log_std = torch.clamp(log_std, min=self.log_std_min, max=self.log_std_max)
+        x = F.relu(self.linear1(state))
+        x = F.relu(self.linear2(x))
+        mean = self.mean_linear(x)
+        log_std = self.log_std_linear(x)
+        log_std = torch.clamp(log_std, min=self.log_std_min, max=self.log_std_max)
         return mean, log_std
 
     def sample(self, state, epsilon=1e-6):
@@ -149,17 +125,9 @@ class PolicyNetwork(nn.Module):
         normal = Normal(mean, std)
         x_t = normal.rsample()
         action = torch.tanh(x_t)
-        # print(action.shape)
-        if (action.shape[0] == batch_size):
-            action = action.reshape(batch_size, self.action_dim)
-        else:
-            action = action.reshape(self.action_dim,)
-
-        # print(action[1])
         log_prob = normal.log_prob(x_t)
         log_prob -= torch.log(1 - action.pow(2) + epsilon)
         log_prob = log_prob.sum(1, keepdim=True)
-        # print(action.shape, log_prob.shape)
         return action, log_prob, mean, log_std
 
 class SAC(object):
@@ -170,12 +138,9 @@ class SAC(object):
                  hidden_dim=256,
                  lr=0.0003):
 
-        torch.autograd.set_detect_anomaly(True)
-
         self.gamma = gamma
         self.tau = tau
         self.alpha = alpha
-        self.action_dim = action_dim
         # self.action_range = [action_space.low, action_space.high]
         self.lr=lr
 
@@ -210,9 +175,8 @@ class SAC(object):
         else:
             _, _, action, _ = self.policy.sample(state)
             action = torch.tanh(action)
-        action = action.detach().cpu().numpy()
-        # print(action)
-        return action.reshape(self.action_dim,)
+        action = action.detach().cpu().numpy()[0]
+        return action
 
     # def rescale_action(self, action):
     #     return action * (self.action_range[1] - self.action_range[0]) / 2.0 +\
@@ -235,9 +199,6 @@ class SAC(object):
             qf1_next_target, qf2_next_target = self.critic_target(next_state_batch, next_state_action)
             min_qf_next_target = torch.min(qf1_next_target, qf2_next_target) - self.alpha * next_state_log_pi
             next_q_value = reward_batch + (1 - done_batch) * self.gamma * (min_qf_next_target)
-
-        # print(next_state_action.shape, next_state_log_pi.shape, qf1_next_target.shape, qf2_next_target.shape, min_qf_next_target.shape, next_q_value.shape)
-        # print("----------------")
 
         qf1, qf2 = self.critic(state_batch, action_batch)  # Two Q-functions to mitigate positive bias in the policy improvement step
         qf1_loss = F.mse_loss(qf1, next_q_value) #
@@ -309,8 +270,8 @@ max_steps   = 500
 rewards     = []
 batch_size  = 256
 
-action_dim = 2
-state_dim  = 24
+action_dim = 3
+state_dim  = 26
 hidden_dim = 512
 ACTION_V_MIN = 0.0 # m/s
 ACTION_W_MIN = -0.25 # rad
@@ -342,7 +303,7 @@ if __name__ == '__main__':
     result = Float32()
     env = Env()
     before_training = 4
-    past_action = np.array([0.,0.])
+    past_action = np.array([0.,0.,0.0])
 
     for ep in range(ep_0, max_episodes):
         done = False
@@ -373,7 +334,7 @@ if __name__ == '__main__':
 
             if not is_training:
                 action = agent.select_action(state, eval=True)
-            unnorm_action = np.array([action_unnormalized(action[0], ACTION_V_MAX, ACTION_V_MIN), action_unnormalized(action[1], ACTION_W_MAX, ACTION_W_MIN)])
+            unnorm_action = np.array([action_unnormalized(action[0], ACTION_V_MAX, ACTION_V_MIN), action_unnormalized(action[1], ACTION_W_MAX, ACTION_W_MIN), action_unnormalized(action[2], ACTION_W_MAX, ACTION_W_MIN)])
 
             next_state, reward, done = env.step(unnorm_action, past_action)
             # print('action', unnorm_action,'r',reward)
@@ -396,6 +357,10 @@ if __name__ == '__main__':
             if done:
                 break
 
+            # if (reward == 100):
+            #     is_training = False
+            #     break
+
         rospy.loginfo("Reward per ep: %s", str(rewards_current_episode))
         rospy.loginfo("Break step: %s", str(step))
         if ep%2 == 0:
@@ -403,7 +368,9 @@ if __name__ == '__main__':
             result = (str(ep)+','+str(rewards_current_episode))
             pub_result.publish(result)
 
-        if ep%10 == 0:
+        if ep%20 == 0:
             agent.save_models(ep)
 
-# roslaunch hydrone_aerial_underwater_ddpg deep_RL_2D.launch ep:=0 file_dir:=sac_stage_1_air2D_tanh_3layers deep_rl:=sac_air2D_tanh_3layers.py world:=stage_1_aerial root_dir:=/home/ricardo/
+# roslaunch hydrone_aerial_underwater_ddpg deep_RL_2D.launch ep:=1060 file_dir:=sac_stage_1_air3D_tanh_3layers deep_rl:=sac_air3D_tanh_3layers.py world:=stage_1_aerial root_dir:=/home/ricardo/ graphic_int:=false
+
+# roslaunch hydrone_aerial_underwater_ddpg deep_RL_2D.launch ep:=960 file_dir:=sac_stage_1_air3D_tanh_3layers deep_rl:=sac_air3D_tanh_3layers.py world:=stage_1 root_dir:=/home/ricardo/ graphic_int:=true testing:=true x:=2.0 y:=3.0 z:=-1.0 arr_distance:=0.25 testing_eps:=100

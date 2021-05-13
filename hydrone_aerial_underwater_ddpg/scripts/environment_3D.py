@@ -30,7 +30,7 @@ target_not_movable = True
 
 class Env():
     def __init__(self, action_dim=3):
-        global target_not_movable 
+        global target_not_movable
         self.goal_x = 0
         self.goal_y = 0
         self.goal_z = 0
@@ -59,8 +59,8 @@ class Env():
         else:
             target_not_movable = True
         self.stopped = 0
-        self.action_dim = action_dim        
-        self.last_time = datetime.now() 
+        self.action_dim = action_dim
+        self.last_time = datetime.now()
 
         self.hardstep = 0
         #Keys CTRL + c will stop script
@@ -100,8 +100,8 @@ class Env():
 
         self.heading = round(heading, 3)
 
-    def getState(self, scan, past_action):        
-        scan_range = []        
+    def getState(self, scan, past_action):
+        scan_range = []
         min_range = 0.6
         done = False
 
@@ -122,15 +122,15 @@ class Env():
 
         current_distance = math.sqrt((self.goal_x - self.position.x)**2 + (self.goal_y - self.position.y)**2 + (self.goal_z - self.position.z)**2)
         # current_distance = math.sqrt((self.goal_x - self.position.x)**2 + (self.goal_y - self.position.y)**2)
-        
+
         if current_distance < self.arriving_distance:
             self.get_goalbox = True
 
         return scan_range + [self.heading, self.heading_z, current_distance], done
 
-    def setReward(self, state, done):   
+    def setReward(self, state, done):
         reward = 0
-             
+
         if done:
             rospy.loginfo("Collision!!")
             # reward = -550.
@@ -152,7 +152,7 @@ class Env():
 
         if (reward == 100 and self.evaluating==True and self.eval_path==False):
             self.pub_reward.publish(True)
-        
+
         if (reward == 100 and self.evaluating==True and self.eval_path==True and (self.respawn_goal.counter%(len(self.respawn_goal.goal_x_list)+1))==0):
             self.pub_reward.publish(True)
             self.respawn_goal.counter = 0
@@ -166,15 +166,15 @@ class Env():
 
         return reward, done
 
-    def step(self, action, past_action):        
-        linear_vel_x = action[0]        
+    def step(self, action, past_action):
+        linear_vel_x = action[0]
         linear_vel_z = action[1]
         angular_vel_z = action[2]
         # angular_vel_z = action[2]
 
         vel_cmd = Twist()
         vel_cmd.linear.x = linear_vel_x
-        vel_cmd.linear.z = linear_vel_z     
+        vel_cmd.linear.z = linear_vel_z
         vel_cmd.angular.z = angular_vel_z
 
         self.pub_cmd_vel.publish(vel_cmd)
@@ -182,7 +182,7 @@ class Env():
         self.hardstep += 1
 
         data = None
-        
+
         while data is None:
             try:
                 data = rospy.wait_for_message('/hydrone_aerial_underwater/scan', LaserScan, timeout=5)
@@ -195,14 +195,14 @@ class Env():
         return np.asarray(state), reward, done
 
     def reset(self):
-        #print('aqui2_____________---')        
+        #print('aqui2_____________---')
         rospy.wait_for_service('gazebo/reset_simulation')
         try:
             self.reset_proxy()
         except (rospy.ServiceException) as e:
             print("gazebo/reset_simulation service call failed")
 
-        data = None        
+        data = None
         while data is None:
             try:
                 data = rospy.wait_for_message('/hydrone_aerial_underwater/scan', LaserScan, timeout=5)
