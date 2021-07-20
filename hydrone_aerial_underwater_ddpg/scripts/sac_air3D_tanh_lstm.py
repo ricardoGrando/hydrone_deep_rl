@@ -297,7 +297,7 @@ class SAC(object):
         hard_update(self.critic_target, self.critic)
         print('***Models load***')
 
-is_training = False
+is_training = True
 
 max_episodes  = 10001
 max_steps   = 500

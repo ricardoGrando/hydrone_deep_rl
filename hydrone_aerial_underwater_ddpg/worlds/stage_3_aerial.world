@@ -1,6 +1,6 @@
 <?xml version="1.0" ?>
 <sdf version="1.4">
-  <world name="default">       
+  <world name="default">
 
     <plugin name="ros_interface_plugin" filename="librotors_gazebo_ros_interface_plugin.so"/>
 
@@ -80,10 +80,10 @@
     </include>
 
     <!-- Bounding box with sea surface -->
-    <!-- <include>
+    <include>
       <uri>model://ocean</uri>
       <pose>0 0 0 0 0 0</pose>
-    </include> -->
+    </include>
 
     <include>
       <uri>model://grey_wall</uri>
@@ -94,7 +94,7 @@
     <include>
       <uri>model://grey_wall</uri>
       <pose>0 5.0 -1.0 0 0 0</pose>
-      <name>grey_wall_1</name>	
+      <name>grey_wall_1</name>
     </include>
 
     <include>
@@ -111,7 +111,7 @@
 
     <include>
       <uri>model://grey_wall</uri>
-      <pose>0.0 1.5 -0.1 1.57079632679 0 0</pose>
+      <pose>0.0 1.5 -2.1 1.57079632679 0 0</pose>
       <name>grey_wall_4</name>
     </include>
 
@@ -179,7 +179,7 @@
       <uri>model://obstacle_2</uri>
       <pose>-2.0 -2.35 2.2 -1.55 1.5 0</pose>
       <name>obstacle_10</name>
-    </include>    
+    </include>
 
     <include>
       <uri>model://obstacle_2</uri>
@@ -210,7 +210,37 @@
       <pose>0.0 2.5 2.4 -3.1 1.55 0.0</pose>
       <name>obstacle_15</name>
     </include>
-    
+
+    <plugin name="underwater_current_plugin" filename="libuuv_underwater_current_ros_plugin.so">
+      <namespace>hydrodynamics</namespace>
+      <constant_current>
+        <topic>current_velocity</topic>
+        <velocity>
+          <mean>0</mean>
+          <min>0</min>
+          <max>5</max>
+          <mu>0.0</mu>
+          <noiseAmp>0.0</noiseAmp>
+        </velocity>
+
+        <horizontal_angle>
+          <mean>0</mean>
+          <min>-3.141592653589793238</min>
+          <max>3.141592653589793238</max>
+          <mu>0.0</mu>
+          <noiseAmp>0.0</noiseAmp>
+        </horizontal_angle>
+
+        <vertical_angle>
+          <mean>0</mean>
+          <min>-3.141592653589793238</min>
+          <max>3.141592653589793238</max>
+          <mu>0.0</mu>
+          <noiseAmp>0.0</noiseAmp>
+        </vertical_angle>
+      </constant_current>
+    </plugin>
+
     <plugin name="sc_interface" filename="libuuv_sc_ros_interface_plugin.so"/>
 
     <gui fullscreen='0'>

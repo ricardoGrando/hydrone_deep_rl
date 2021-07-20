@@ -284,7 +284,7 @@ def action_unnormalized(action, high, low):
 
 #---Run agent---#
 
-is_training = False
+is_training = True
 
 #---Where the train is made---#
 

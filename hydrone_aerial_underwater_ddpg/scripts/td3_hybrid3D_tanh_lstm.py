@@ -289,7 +289,7 @@ is_training = False
 #---Where the train is made---#
 
 BATCH_SIZE = 256
-LEARNING_RATE = 3e-4
+LEARNING_RATE = 1e-4
 GAMMA = 0.99
 TAU = 0.001
 

@@ -25,8 +25,8 @@ counter_eps = 0
 last_time = datetime.now()
 pub_reward = rospy.Publisher("/hydrone_aerial_underwater/rewarded", Bool, queue_size=5)
 
-posx = [3.6, 0.0, -3.6, -3.6, 0.0]
-posy = [2.6, 3.5, 3.0, 1.0, 0.0]
+posx = [0.0]#[3.6]#, 0.0, -3.6, -3.6, 0.0]
+posy = [0.0]#[2.6]#, 3.5, 3.0, 1.0, 0.0]
 
 # posx = [1.0, 0.0, -2.0, -2.0, 0.0, 1.0, 0.0]
 # posy = [1.0, 2.0, 2.0, -2.0, -2.0, -1.0, 0.0]
@@ -35,7 +35,7 @@ posy = [2.6, 3.5, 3.0, 1.0, 0.0]
 # self.goal_y_list = [2.0, 3.0, 2.0, -2.0, -3.0, -2.0, 0.0]
 
 # posz = [2.5, 3.0, 2.0, 2.5, 2.0, 3.0, 2.5]
-posz = [1.5, 2.0, 3.0, 2.5, 2.5]
+posz = [2.5]#[-1.0]#, 2.0, 3.0, 2.5, 2.5]
 
 _data = Odometry()
 scan = LaserScan()
@@ -53,7 +53,7 @@ def laser_callback(data):
     global collision
     scan = data
 
-    if (min(scan.ranges) < 0.6):
+    if (min(scan.ranges) < 0.7):
         print("Whatever")
         collision = True
 
@@ -300,6 +300,8 @@ if __name__ == "__main__":
                     # break
             if collision:
                 break
+
+            # check_z_position(posz[j])
 
         if collision:
             reset(False)
